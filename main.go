@@ -426,13 +426,14 @@ func handleModifiedFile(file string, repoFullName string) error {
 		}
 
 		if state != "" && state != currentState.State {
-			if state == "closed" {
+			switch state {
+			case "closed":
 				fmt.Printf("Closing Issue #%s...\n", number)
 				_, stdErr, err = gh.Exec("issue", "close", number, "-R", repoFullName)
 				if err != nil {
 					return fmt.Errorf("failed to close issue: %s", stdErr.String())
 				}
-			} else if state == "open" {
+			case "open":
 				fmt.Printf("Reopening Issue #%s...\n", number)
 				_, stdErr, err = gh.Exec("issue", "reopen", number, "-R", repoFullName)
 				if err != nil {
