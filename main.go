@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp" // --- ADDED ---
 	"strconv"
 	"strings"
 	"time"
@@ -162,14 +163,43 @@ func processPulledIssues(issues []Issue) error {
 		b.WriteString("---\n\n")
 		b.WriteString(strings.ReplaceAll(issue.Body, "\r", ""))
 
-		var filePath string
+		// --- MODIFIED ---
+		slug := generateSlug(issue.Title)
+		newFileName := fmt.Sprintf("%d-%s.md", issue.Number, slug)
+
+		var targetDir, oldDir string
 		if issue.State == "open" {
-			filePath = filepath.Join(openDir, fmt.Sprintf("%d.md", issue.Number))
-			os.Remove(filepath.Join(closedDir, fmt.Sprintf("%d.md", issue.Number)))
+			targetDir = openDir
+			oldDir = closedDir
 		} else {
-			filePath = filepath.Join(closedDir, fmt.Sprintf("%d.md", issue.Number))
-			os.Remove(filepath.Join(openDir, fmt.Sprintf("%d.md", issue.Number)))
+			targetDir = closedDir
+			oldDir = openDir
 		}
+
+		// --- REVISED FILE REMOVAL LOGIC ---
+
+		// 1. Clean up the OTHER directory (for state changes)
+		os.Remove(filepath.Join(oldDir, fmt.Sprintf("%d.md", issue.Number))) // Remove old "NUMBER.md"
+		matchesOld, _ := filepath.Glob(filepath.Join(oldDir, fmt.Sprintf("%d-*.md", issue.Number)))
+		for _, match := range matchesOld {
+			os.Remove(match)
+		}
+
+		// 2. Clean up the TARGET directory (for title/slug changes)
+		// This finds any file with the same number but a different slug
+		matchesTarget, _ := filepath.Glob(filepath.Join(targetDir, fmt.Sprintf("%d-*.md", issue.Number)))
+		for _, match := range matchesTarget {
+			if filepath.Base(match) != newFileName {
+				fmt.Printf("Removing old file: %s\n", match)
+				os.Remove(match)
+			}
+		}
+		// Also remove old "NUMBER.md" format from target dir
+		os.Remove(filepath.Join(targetDir, fmt.Sprintf("%d.md", issue.Number)))
+		// --- END REVISED LOGIC ---
+
+		filePath := filepath.Join(targetDir, newFileName)
+		// --- END MODIFIED ---
 
 		fmt.Printf("Writing file: %s\n", filePath)
 		if err := ioutil.WriteFile(filePath, []byte(b.String()), 0644); err != nil {
@@ -254,7 +284,14 @@ func pushIssues() error {
 func handleDeletedFile(file string, repoFullName string) error {
 	fmt.Printf("File %s was deleted.\n", file)
 	base := filepath.Base(file)
-	numberStr := strings.TrimSuffix(base, ".md")
+
+	// --- MODIFIED ---
+	fileNameNoExt := strings.TrimSuffix(base, ".md")
+	numberStr := fileNameNoExt
+	if parts := strings.SplitN(fileNameNoExt, "-", 2); len(parts) > 0 {
+		numberStr = parts[0] // Take only the part before the first hyphen
+	}
+	// --- END MODIFIED ---
 
 	if _, err := strconv.Atoi(numberStr); err != nil {
 		fmt.Printf("Skipping deleted file %s (name is not an issue number).\n", file)
@@ -286,6 +323,7 @@ func handleDeletedFile(file string, repoFullName string) error {
 	return nil
 }
 
+// handleModifiedFile creates or updates an issue on GitHub
 // handleModifiedFile creates or updates an issue on GitHub
 func handleModifiedFile(file string, repoFullName string) error {
 	data, err := ioutil.ReadFile(file)
@@ -327,7 +365,22 @@ func handleModifiedFile(file string, repoFullName string) error {
 		)
 
 		fmt.Printf("Created Issue #%s. Writing number back to %s...\n", newNumber, file)
-		return ioutil.WriteFile(file, []byte(newContent), 0644)
+		if err := ioutil.WriteFile(file, []byte(newContent), 0644); err != nil {
+			return err
+		}
+
+		// Rename the file to include the new slug
+		slug := generateSlug(title)
+		newFileName := fmt.Sprintf("%s-%s.md", newNumber, slug)
+		newFilePath := filepath.Join(filepath.Dir(file), newFileName)
+
+		if file != newFilePath {
+			fmt.Printf("Renaming file to %s\n", newFilePath)
+			if err := os.Rename(file, newFilePath); err != nil {
+				return fmt.Errorf("failed to rename file %s to %s: %w", file, newFilePath, err)
+			}
+		}
+		return nil
 
 	} else {
 		// 6. UPDATE Issue
@@ -343,6 +396,21 @@ func handleModifiedFile(file string, repoFullName string) error {
 		if err != nil {
 			return fmt.Errorf("failed to edit issue: %s", stdErr.String())
 		}
+
+		// --- ADDED: Check for local file rename on title update ---
+		slug := generateSlug(title)
+		newFileName := fmt.Sprintf("%s-%s.md", number, slug)
+		currentBaseName := filepath.Base(file)
+
+		if currentBaseName != newFileName {
+			newFilePath := filepath.Join(filepath.Dir(file), newFileName)
+			fmt.Printf("Updating local filename to match new title: %s\n", newFilePath)
+			if err := os.Rename(file, newFilePath); err != nil {
+				// Log the error but don't stop the whole push
+				fmt.Printf("Warning: failed to rename file %s to %s: %v\n", file, newFilePath, err)
+			}
+		}
+		// --- END ADDED ---
 
 		// 7. Handle State Change
 		var currentState struct {
@@ -377,6 +445,24 @@ func handleModifiedFile(file string, repoFullName string) error {
 }
 
 // --- Helper Functions for Parsing ---
+
+// --- ADDED ---
+// A regex to find unwanted characters in a slug
+var nonSlugChars = regexp.MustCompile(`[^a-z0-9\s-]`)
+
+// A regex to collapse multiple hyphens
+var multiHyphen = regexp.MustCompile(`-+`)
+
+func generateSlug(title string) string {
+	slug := strings.ToLower(title)
+	slug = strings.ReplaceAll(slug, " ", "-")
+	slug = nonSlugChars.ReplaceAllString(slug, "")
+	slug = multiHyphen.ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	return slug
+}
+
+// --- END ADDED ---
 
 // parseFrontmatter is a simple, dependency-free YAML parser
 func parseFrontmatter(data []byte) map[string]string {
