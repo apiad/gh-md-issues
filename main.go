@@ -358,7 +358,7 @@ func handleModifiedFile(file string, repoFullName string) error {
 		newURL := strings.TrimSpace(stdOut.String())
 		newNumber := filepath.Base(newURL)
 
-		newContent := fmt.Sprintf("---\nnumber: %s\n%s---\n\n%s",
+		newContent := fmt.Sprintf("---\nnumber: %s\n%s\n---\n\n%s",
 			newNumber,
 			getRawFrontmatter(data), // Get the original frontmatter content
 			body,
