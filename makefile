@@ -10,13 +10,8 @@ $(BINARY): main.go
 	go build -o $(BINARY)
 	@chmod +x $(BINARY)
 
-# This target creates 'main.go' from our literate source.
-# It depends on 'gh-md-issues.md'. If we edit the .md file,
-# 'make' will know it needs to re-run this.
-main.go: gh-md-issues.md
-	@echo "Tangling gh-md-issues.md -> main.go"
-	@illiterate gh-md-issues.md
-	@echo "Tidying go modules..."
+# This target tidies 'main.go'.
+main.go:
 	@go mod tidy
 
 # A helper to install the extension locally for testing.
