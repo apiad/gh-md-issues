@@ -1,6 +1,8 @@
 ---
 number: 1
-title: Names with slugs
+title: "Names with slugs"
+state: closed
+labels:
 ---
 
 Make markdown filename have the format `NUMBER-SLUG` with slugs from the title of the issue, so we can better search them with `ls`.
